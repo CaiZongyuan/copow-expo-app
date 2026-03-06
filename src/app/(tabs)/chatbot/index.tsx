@@ -68,6 +68,20 @@ function formatToolInput(toolName: string | undefined, input: any) {
   }
 
   switch (toolName) {
+    case "list_writable_calendars":
+      return [`Include hidden: ${input.includeHidden ? "yes" : "no"}`].join(
+        "\n"
+      );
+    case "open_external_url":
+      return [
+        input.label ? `Label: ${input.label}` : null,
+        input.appName ? `App: ${input.appName}` : null,
+        input.intent ? `Intent: ${input.intent}` : null,
+        `URL: ${input.url}`,
+        input.fallbackUrl ? `Fallback: ${input.fallbackUrl}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n");
     case "create_calendar_event":
       return [
         `Title: ${input.title}`,
@@ -100,6 +114,35 @@ function formatToolOutput(toolName: string | undefined, output: any) {
         `Timezone: ${output.timeZone}`,
         `ISO: ${output.nowIso}`,
       ].join("\n");
+    case "list_writable_calendars":
+      return [
+        `Writable calendars: ${output.total}`,
+        ...(output.calendars ?? []).map((calendar: any) => {
+          const details = [
+            calendar.sourceName,
+            calendar.ownerAccount,
+            calendar.isPrimary ? "primary" : null,
+            calendar.isVisible ? null : "hidden",
+          ]
+            .filter(Boolean)
+            .join(" | ");
+
+          return details
+            ? `- ${calendar.title} | ${details}`
+            : `- ${calendar.title}`;
+        }),
+      ].join("\n");
+    case "open_external_url":
+      return [
+        `Status: ${output.status}`,
+        output.appName ? `App: ${output.appName}` : null,
+        output.intent ? `Intent: ${output.intent}` : null,
+        output.label ? `Label: ${output.label}` : null,
+        `Opened: ${output.openedUrl}`,
+        output.usedFallback ? `Requested: ${output.requestedUrl}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n");
     case "get_today_steps":
       return [`Date: ${output.date}`, `Steps: ${output.steps} ${output.unit}`].join("\n");
     case "get_recent_sleep":

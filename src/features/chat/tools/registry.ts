@@ -2,7 +2,13 @@ import { tool } from "ai";
 import { z } from "zod";
 
 type ChatToolRuntime = "server" | "mobile";
-type ChatToolDomain = "utility" | "health" | "contacts" | "calendar" | "location";
+type ChatToolDomain =
+  | "utility"
+  | "health"
+  | "contacts"
+  | "calendar"
+  | "location"
+  | "external";
 type ChatToolPlatform = "ios" | "android" | "web";
 export type ChatToolApprovalMode = "auto" | "confirm";
 
@@ -162,6 +168,29 @@ const getUpcomingEventsOutputSchema = z.object({
   ),
 });
 
+const listWritableCalendarsInputSchema = z.object({
+  includeHidden: z
+    .boolean()
+    .default(false)
+    .describe(
+      "Whether to include writable calendars that are currently hidden in the system calendar UI"
+    ),
+});
+
+const listWritableCalendarsOutputSchema = z.object({
+  total: z.number(),
+  calendars: z.array(
+    z.object({
+      id: z.string(),
+      title: z.string(),
+      sourceName: z.string().nullable(),
+      ownerAccount: z.string().nullable(),
+      isPrimary: z.boolean(),
+      isVisible: z.boolean(),
+    })
+  ),
+});
+
 const createCalendarEventInputSchema = z.object({
   title: z.string().min(1).describe("Title for the new calendar event"),
   startDate: z
@@ -199,6 +228,45 @@ const createCalendarEventOutputSchema = z.object({
   location: z.string().nullable(),
   notes: z.string().nullable(),
   isAllDay: z.boolean(),
+});
+
+const openExternalUrlInputSchema = z.object({
+  url: z
+    .string()
+    .min(1)
+    .describe(
+      "The exact external URL, universal link, or deep link to open. It must include an explicit scheme such as https:, maps:, tel:, mailto:, or an app-specific custom scheme."
+    ),
+  label: z
+    .string()
+    .optional()
+    .describe("Short human-readable label for the action being opened"),
+  appName: z
+    .string()
+    .optional()
+    .describe("Optional target app name such as Apple Maps, AMap, or DiDi"),
+  intent: z
+    .string()
+    .optional()
+    .describe(
+      "Short description of why this URL is being opened, such as navigate, ride_hailing, or open_web_page"
+    ),
+  fallbackUrl: z
+    .string()
+    .optional()
+    .describe(
+      "Optional fallback URL to try if the primary deep link cannot be opened"
+    ),
+});
+
+const openExternalUrlOutputSchema = z.object({
+  status: z.enum(["opened", "fallback-opened"]),
+  requestedUrl: z.string(),
+  openedUrl: z.string(),
+  label: z.string().nullable(),
+  appName: z.string().nullable(),
+  intent: z.string().nullable(),
+  usedFallback: z.boolean(),
 });
 
 const getCurrentLocationInputSchema = z.object({
@@ -385,6 +453,18 @@ export const mobileToolDefinitions = {
       { input: { days: 7, limit: 5 } },
     ],
   },
+  list_writable_calendars: {
+    label: "List Writable Calendars",
+    description:
+      "List the user's writable event calendars. Use this before creating a calendar event when the user mentions a specific calendar such as work or personal, or when you need to know which calendars can actually accept new events.",
+    runtime: "mobile",
+    domain: "calendar",
+    platforms: ["ios", "android"],
+    approvalMode: "auto",
+    inputSchema: listWritableCalendarsInputSchema,
+    outputSchema: listWritableCalendarsOutputSchema,
+    inputExamples: [{ input: {} }, { input: { includeHidden: true } }],
+  },
   create_calendar_event: {
     label: "Create Calendar Event",
     description:
@@ -412,6 +492,36 @@ export const mobileToolDefinitions = {
           startDate: "2026-03-08T14:00:00+08:00",
           endDate: "2026-03-08T15:00:00+08:00",
           allDay: false,
+        },
+      },
+    ],
+  },
+  open_external_url: {
+    label: "Open External URL",
+    description:
+      "Open an external app link, universal link, or web URL on the user's device after explicit confirmation. Use this only when the user clearly wants to leave the app or hand work off to another app such as maps, browser, phone, email, or ride-hailing. Prefer a fallback URL when the primary link depends on a specific app.",
+    runtime: "mobile",
+    domain: "external",
+    platforms: ["ios", "android", "web"],
+    approvalMode: "confirm",
+    inputSchema: openExternalUrlInputSchema,
+    outputSchema: openExternalUrlOutputSchema,
+    inputExamples: [
+      {
+        input: {
+          url: "https://maps.apple.com/?q=Shanghai%20Hongqiao%20Station",
+          label: "Open map search",
+          appName: "Apple Maps",
+          intent: "search_place",
+        },
+      },
+      {
+        input: {
+          url: "myapp://open?destination=airport",
+          fallbackUrl: "https://example.com/open?destination=airport",
+          label: "Open app deep link",
+          appName: "Example App",
+          intent: "handoff_to_external_app",
         },
       },
     ],

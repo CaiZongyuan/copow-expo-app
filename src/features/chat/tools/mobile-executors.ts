@@ -1,5 +1,6 @@
 import * as Calendar from "expo-calendar";
 import * as Contacts from "expo-contacts";
+import * as Linking from "expo-linking";
 import * as Location from "expo-location";
 import {
   CategoryValueSleepAnalysis,
@@ -18,6 +19,15 @@ type MobileToolExecutor = (input: any) => Promise<unknown>;
 type WritableEventCalendar = Calendar.Calendar & {
   allowsModifications: true;
 };
+
+const blockedExternalUrlSchemes = new Set([
+  "about",
+  "blob",
+  "content",
+  "data",
+  "file",
+  "javascript",
+]);
 
 function toIsoString(value: Date) {
   return value.toISOString();
@@ -47,6 +57,76 @@ function parseRequiredDate(value: string, fieldName: string) {
   }
 
   return parsed;
+}
+
+function getUrlScheme(url: string) {
+  const match = url.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/);
+
+  return match?.[1]?.toLowerCase();
+}
+
+function validateExternalUrl(url: string, fieldName: string) {
+  const normalizedUrl = url.trim();
+
+  if (!normalizedUrl) {
+    throw new Error(`External URL ${fieldName} must not be empty.`);
+  }
+
+  const scheme = getUrlScheme(normalizedUrl);
+
+  if (!scheme) {
+    throw new Error(
+      `External URL ${fieldName} must include an explicit URL scheme such as https: or an app-specific scheme.`
+    );
+  }
+
+  if (blockedExternalUrlSchemes.has(scheme)) {
+    throw new Error(
+      `External URL ${fieldName} uses a blocked scheme: ${scheme}.`
+    );
+  }
+
+  return normalizedUrl;
+}
+
+async function openExternalUrlWithFallback({
+  url,
+  fallbackUrl,
+}: {
+  url: string;
+  fallbackUrl?: string;
+}) {
+  try {
+    await Linking.openURL(url);
+
+    return {
+      status: "opened" as const,
+      openedUrl: url,
+      usedFallback: false,
+    };
+  } catch (primaryError) {
+    if (!fallbackUrl || fallbackUrl === url) {
+      throw new Error(
+        `Could not open the requested external URL. ${errorMessage(primaryError)}`
+      );
+    }
+
+    try {
+      await Linking.openURL(fallbackUrl);
+
+      return {
+        status: "fallback-opened" as const,
+        openedUrl: fallbackUrl,
+        usedFallback: true,
+      };
+    } catch (fallbackError) {
+      throw new Error(
+        `Could not open the requested external URL or its fallback. Primary error: ${errorMessage(
+          primaryError
+        )} Fallback error: ${errorMessage(fallbackError)}`
+      );
+    }
+  }
 }
 
 function sleepStageLabel(value: CategoryValueSleepAnalysis) {
@@ -117,6 +197,37 @@ function isWritableEventCalendar(
   calendar: Calendar.Calendar
 ): calendar is WritableEventCalendar {
   return calendar.entityType === Calendar.EntityTypes.EVENT && calendar.allowsModifications;
+}
+
+function normalizeWritableCalendar(calendar: WritableEventCalendar) {
+  return {
+    id: calendar.id,
+    title: calendar.title,
+    sourceName: calendar.source?.name ?? null,
+    ownerAccount: calendar.ownerAccount ?? null,
+    isPrimary: calendar.isPrimary === true,
+    isVisible: calendar.isVisible !== false,
+  };
+}
+
+async function listWritableEventCalendars(includeHidden = false) {
+  const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
+
+  return calendars
+    .filter(isWritableEventCalendar)
+    .filter((calendar) => includeHidden || calendar.isVisible !== false)
+    .map(normalizeWritableCalendar)
+    .sort((left, right) => {
+      if (left.isPrimary !== right.isPrimary) {
+        return left.isPrimary ? -1 : 1;
+      }
+
+      if (left.isVisible !== right.isVisible) {
+        return left.isVisible ? -1 : 1;
+      }
+
+      return left.title.localeCompare(right.title);
+    });
 }
 
 async function getWritableEventCalendar(preferredCalendarId?: string) {
@@ -341,6 +452,16 @@ const mobileToolExecutors: Record<MobileToolName, MobileToolExecutor> = {
       events: normalizedEvents,
     };
   },
+  list_writable_calendars: async ({ includeHidden = false }) => {
+    await ensureCalendarAccess();
+
+    const calendars = await listWritableEventCalendars(includeHidden);
+
+    return {
+      total: calendars.length,
+      calendars,
+    };
+  },
   create_calendar_event: async ({
     title,
     startDate,
@@ -385,6 +506,27 @@ const mobileToolExecutors: Record<MobileToolName, MobileToolExecutor> = {
       location: createdEvent?.location ?? location ?? null,
       notes: createdEvent?.notes ?? notes ?? null,
       isAllDay: createdEvent?.allDay ?? allDay,
+    };
+  },
+  open_external_url: async ({ url, label, appName, intent, fallbackUrl }) => {
+    const requestedUrl = validateExternalUrl(url, "url");
+    const normalizedFallbackUrl = fallbackUrl
+      ? validateExternalUrl(fallbackUrl, "fallbackUrl")
+      : undefined;
+
+    const result = await openExternalUrlWithFallback({
+      url: requestedUrl,
+      fallbackUrl: normalizedFallbackUrl,
+    });
+
+    return {
+      status: result.status,
+      requestedUrl,
+      openedUrl: result.openedUrl,
+      label: label ?? null,
+      appName: appName ?? null,
+      intent: intent ?? null,
+      usedFallback: result.usedFallback,
     };
   },
   get_current_location: async ({ includeAddress = true }) => {
