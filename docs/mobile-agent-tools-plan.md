@@ -100,7 +100,13 @@ This means the app should use AI SDK's client-side tool flow:
 - `Completed`: fixed duplicate React list keys in chat rendering by switching to composite message/part keys.
 - `Completed`: replaced the chat message container with `FlatList` for more stable list rendering.
 - `Completed`: migrated the chatbot screen styling toward Uniwind/Tailwind `className` usage instead of inline styles.
-- `Pending`: add confirmation flow for sensitive tools before introducing write actions.
+- `Completed`: added confirmation-aware mobile tool flow in `src/app/(tabs)/chatbot/index.tsx`, including approval cards, approve/deny actions, and auto-continuation after approval responses.
+- `Completed`: taught `onToolCall` to skip confirm-only mobile tools until the matching approval response has been granted.
+- `Completed`: added `create_calendar_event` to the shared tool registry with `approvalMode: "confirm"`.
+- `Completed`: implemented `create_calendar_event` in `src/features/chat/tools/mobile-executors.ts` with writable-calendar selection, ISO date validation, and normalized result output.
+- `Completed`: added server-side `get_current_time` so the model can ground itself on a precise current timestamp when users ask about now/today or when calendar planning needs a time reference.
+- `Completed`: added tool input examples for more complex tools and wrapped the chat model with AI SDK's tool-example middleware so providers like the current OpenAI-compatible Qwen backend still see few-shot guidance.
+- `Completed`: fixed the approval execution gap for confirm-only client tools by executing the approved mobile tool directly on-device after the user presses Approve, instead of assuming the server will re-run a tool that has no server-side `execute` handler.
 
 ## Issues & Risks
 
@@ -108,6 +114,8 @@ This means the app should use AI SDK's client-side tool flow:
 - Sensitive capabilities should not auto-run without explicit user approval.
 - Raw native payloads can be too verbose or privacy-invasive for LLM context.
 - Expo Go / dev-client / native-build differences can affect which tools are actually available.
+- `create_calendar_event` currently requires the model to already know `title`, `startDate`, and `endDate`; ambiguous requests still need the assistant to ask follow-up questions first.
+- AI SDK approval handling behaves differently for local/client tools versus provider/server-executed tools; for local tools without `execute`, an approval response alone does not create a tool result.
 - The existing `docs/expo-dev-client-chat-api-notes.md` appears to contain encoding issues and may need cleanup later, but that is not required for this task.
 
 ## Decisions
@@ -117,6 +125,9 @@ This means the app should use AI SDK's client-side tool flow:
 - Start with read-only health tools because they are high-value and technically representative.
 - Preserve implementation context in `docs/` on each meaningful phase.
 - Keep tool definitions centralized so server route registration and client execution can evolve from one source of truth.
+- Use AI SDK approval responses as the gate for confirm-only mobile tools, and only execute those tools on-device after the related approval has been recorded in chat state.
+- Give the model a concrete notion of current time in two ways: a stamped system prompt and a deterministic `get_current_time` tool.
+- Add tool input examples to complex tools and use middleware to fold those examples into tool descriptions for providers that ignore native `inputExamples` support.
 
 ## Implementation Notes
 
@@ -129,11 +140,17 @@ This means the app should use AI SDK's client-side tool flow:
 - AI SDK message IDs can repeat during streaming/reconciliation, so chat list rendering should use composite keys that include the render index.
 - `FlatList` is a better fit than `ScrollView` for streamed chat messages because it uses explicit keys and scales more predictably as messages grow.
 - In this project, static React Native styling should prefer Uniwind/Tailwind `className` for consistency with the rest of the codebase.
+- AI SDK's stock `lastAssistantMessageIsCompleteWithToolCalls` helper is not enough for confirmation flows by itself; the chatbot screen now uses custom auto-continue logic so denied approvals continue immediately, while approved local tools wait for a real tool result.
+- For confirm-only client tools, the crucial detail is that approval and execution are two separate responsibilities: the approval response informs the model, while the device must still execute the mobile tool itself and publish the tool output with `addToolOutput`.
+- `create_calendar_event` chooses the requested writable calendar when possible, otherwise falls back to the default iOS calendar or the best available writable event calendar on the device.
+- The chatbot screen now only auto-continues on approval responses when the user denied a tool; approved local tools wait for an actual tool result before the next roundtrip.
+- `get_current_time` is intentionally server-side and deterministic so the assistant has a reliable fallback for absolute dates like "today" and "now".
 
 ## Next Steps
 
-1. Add confirmation-aware mobile tools for sensitive actions.
-2. Add platform and permission fallback copy for unsupported environments.
-3. Introduce write-capable tools like `create_calendar_event` with explicit approval.
-4. Consider extracting reusable permission helpers for all mobile tool domains.
-5. Continue updating this file as each phase lands.
+1. Add platform and permission fallback copy for unsupported environments.
+2. Consider extracting reusable permission helpers for all mobile tool domains.
+3. Reuse the new confirmation flow for the next sensitive tools such as `open_external_url`, `pick_document`, and `pick_image`.
+4. Consider richer event-targeting inputs later, such as duration defaults, natural-language time resolution, or optional calendar selection helpers.
+5. If calendar creation still feels brittle in practice, consider adding a preflight read tool that lists writable calendars and/or a confirmation summary generated from structured event inputs before execution.
+6. Continue updating this file as each phase lands.

@@ -15,6 +15,10 @@ import { type MobileToolName } from "@/features/chat/tools/registry";
 
 type MobileToolExecutor = (input: any) => Promise<unknown>;
 
+type WritableEventCalendar = Calendar.Calendar & {
+  allowsModifications: true;
+};
+
 function toIsoString(value: Date) {
   return value.toISOString();
 }
@@ -33,6 +37,16 @@ function toDateValue(value: string | Date | undefined) {
   }
 
   return value instanceof Date ? value : new Date(value);
+}
+
+function parseRequiredDate(value: string, fieldName: string) {
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error(`Calendar event ${fieldName} must be a valid ISO date string.`);
+  }
+
+  return parsed;
 }
 
 function sleepStageLabel(value: CategoryValueSleepAnalysis) {
@@ -97,6 +111,56 @@ async function ensureCalendarAccess() {
   if (permission.status !== "granted") {
     throw new Error("Calendar permission was not granted.");
   }
+}
+
+function isWritableEventCalendar(
+  calendar: Calendar.Calendar
+): calendar is WritableEventCalendar {
+  return calendar.entityType === Calendar.EntityTypes.EVENT && calendar.allowsModifications;
+}
+
+async function getWritableEventCalendar(preferredCalendarId?: string) {
+  const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
+  const writableCalendars = calendars.filter(isWritableEventCalendar);
+
+  if (preferredCalendarId) {
+    const preferredCalendar = writableCalendars.find(
+      (calendar) => calendar.id === preferredCalendarId
+    );
+
+    if (!preferredCalendar) {
+      throw new Error(
+        "The requested calendar could not be found or does not allow event creation."
+      );
+    }
+
+    return preferredCalendar;
+  }
+
+  if (Platform.OS === "ios") {
+    try {
+      const defaultCalendar = await Calendar.getDefaultCalendarAsync();
+
+      if (defaultCalendar && isWritableEventCalendar(defaultCalendar)) {
+        return defaultCalendar;
+      }
+    } catch {
+      // Fall back to the writable calendar list below.
+    }
+  }
+
+  const fallbackCalendar =
+    writableCalendars.find(
+      (calendar) => calendar.isPrimary || calendar.isVisible !== false
+    ) ??
+    writableCalendars.find((calendar) => calendar.isVisible !== false) ??
+    writableCalendars[0];
+
+  if (!fallbackCalendar) {
+    throw new Error("No writable event calendar is available on this device.");
+  }
+
+  return fallbackCalendar;
 }
 
 async function ensureForegroundLocationAccess() {
@@ -275,6 +339,52 @@ const mobileToolExecutors: Record<MobileToolName, MobileToolExecutor> = {
       rangeStart: toIsoString(startDate),
       rangeEnd: toIsoString(endDate),
       events: normalizedEvents,
+    };
+  },
+  create_calendar_event: async ({
+    title,
+    startDate,
+    endDate,
+    location,
+    notes,
+    allDay = false,
+    calendarId,
+  }) => {
+    await ensureCalendarAccess();
+
+    const targetCalendar = await getWritableEventCalendar(calendarId);
+    const eventStartDate = parseRequiredDate(startDate, "startDate");
+    const eventEndDate = parseRequiredDate(endDate, "endDate");
+
+    if (eventEndDate.getTime() <= eventStartDate.getTime()) {
+      throw new Error("Calendar event endDate must be later than startDate.");
+    }
+
+    const eventId = await Calendar.createEventAsync(targetCalendar.id, {
+      title,
+      startDate: eventStartDate,
+      endDate: eventEndDate,
+      location,
+      notes,
+      allDay,
+    });
+
+    const createdEvent = await Calendar.getEventAsync(eventId).catch(() => undefined);
+    const normalizedStartDate =
+      toDateValue(createdEvent?.startDate) ?? eventStartDate;
+    const normalizedEndDate = toDateValue(createdEvent?.endDate) ?? eventEndDate;
+
+    return {
+      status: "created" as const,
+      eventId,
+      calendarId: targetCalendar.id,
+      calendarTitle: targetCalendar.title,
+      title: createdEvent?.title ?? title,
+      startDate: toIsoString(normalizedStartDate),
+      endDate: toIsoString(normalizedEndDate),
+      location: createdEvent?.location ?? location ?? null,
+      notes: createdEvent?.notes ?? notes ?? null,
+      isAllDay: createdEvent?.allDay ?? allDay,
     };
   },
   get_current_location: async ({ includeAddress = true }) => {

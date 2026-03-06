@@ -4,9 +4,12 @@ import { z } from "zod";
 type ChatToolRuntime = "server" | "mobile";
 type ChatToolDomain = "utility" | "health" | "contacts" | "calendar" | "location";
 type ChatToolPlatform = "ios" | "android" | "web";
-type ChatToolApprovalMode = "auto" | "confirm";
+export type ChatToolApprovalMode = "auto" | "confirm";
 
 type ChatToolExecute = (input: any) => Promise<unknown>;
+type ChatToolInputExample = {
+  input: Record<string, unknown>;
+};
 
 type ChatToolDefinition = {
   label: string;
@@ -17,6 +20,7 @@ type ChatToolDefinition = {
   approvalMode: ChatToolApprovalMode;
   inputSchema: z.ZodTypeAny;
   outputSchema?: z.ZodTypeAny;
+  inputExamples?: ChatToolInputExample[];
   execute?: ChatToolExecute;
 };
 
@@ -37,6 +41,24 @@ const convertTemperatureInputSchema = z.object({
 
 const convertTemperatureOutputSchema = z.object({
   celsius: z.number(),
+});
+
+const getCurrentTimeInputSchema = z.object({
+  timeZone: z
+    .string()
+    .optional()
+    .describe(
+      "Optional IANA timezone like Asia/Shanghai or America/Los_Angeles. Leave empty to use the server timezone."
+    ),
+});
+
+const getCurrentTimeOutputSchema = z.object({
+  nowIso: z.string(),
+  date: z.string(),
+  time: z.string(),
+  timeZone: z.string(),
+  utcOffsetMinutes: z.number(),
+  unixMs: z.number(),
 });
 
 const getRecentSleepInputSchema = z.object({
@@ -140,6 +162,45 @@ const getUpcomingEventsOutputSchema = z.object({
   ),
 });
 
+const createCalendarEventInputSchema = z.object({
+  title: z.string().min(1).describe("Title for the new calendar event"),
+  startDate: z
+    .string()
+    .describe("ISO 8601 start date and time for the event"),
+  endDate: z.string().describe("ISO 8601 end date and time for the event"),
+  location: z
+    .string()
+    .optional()
+    .describe("Optional event location to save with the calendar event"),
+  notes: z
+    .string()
+    .optional()
+    .describe("Optional event notes or description"),
+  allDay: z
+    .boolean()
+    .default(false)
+    .describe("Whether the event should be created as an all-day event"),
+  calendarId: z
+    .string()
+    .optional()
+    .describe(
+      "Optional target calendar ID. Omit this to use the default writable calendar."
+    ),
+});
+
+const createCalendarEventOutputSchema = z.object({
+  status: z.literal("created"),
+  eventId: z.string(),
+  calendarId: z.string(),
+  calendarTitle: z.string(),
+  title: z.string(),
+  startDate: z.string(),
+  endDate: z.string(),
+  location: z.string().nullable(),
+  notes: z.string().nullable(),
+  isAllDay: z.boolean(),
+});
+
 const getCurrentLocationInputSchema = z.object({
   includeAddress: z
     .boolean()
@@ -165,6 +226,75 @@ const getCurrentLocationOutputSchema = z.object({
 });
 
 export const serverToolDefinitions = {
+  get_current_time: {
+    label: "Current Time",
+    description:
+      "Get the current time. Use this whenever the user asks about now, today, the current date, the current time, or when you need a concrete time reference before planning calendar actions.",
+    runtime: "server",
+    domain: "utility",
+    platforms: ["ios", "android", "web"],
+    approvalMode: "auto",
+    inputSchema: getCurrentTimeInputSchema,
+    outputSchema: getCurrentTimeOutputSchema,
+    inputExamples: [
+      { input: {} },
+      { input: { timeZone: "America/Los_Angeles" } },
+    ],
+    execute: async ({ timeZone }) => {
+      const now = new Date();
+      const resolvedTimeZone =
+        timeZone && timeZone.trim().length > 0
+          ? timeZone.trim()
+          : Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+      const formatter = new Intl.DateTimeFormat("en-CA", {
+        timeZone: resolvedTimeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
+
+      const parts = formatter.formatToParts(now);
+      const readPart = (type: Intl.DateTimeFormatPartTypes) =>
+        parts.find((part) => part.type === type)?.value ?? "00";
+
+      const year = readPart("year");
+      const month = readPart("month");
+      const day = readPart("day");
+      const hour = readPart("hour");
+      const minute = readPart("minute");
+      const second = readPart("second");
+
+      const offsetFormatter = new Intl.DateTimeFormat("en-US", {
+        timeZone: resolvedTimeZone,
+        timeZoneName: "shortOffset",
+        hour: "2-digit",
+      });
+      const offsetValue =
+        offsetFormatter
+          .formatToParts(now)
+          .find((part) => part.type === "timeZoneName")
+          ?.value ?? "GMT+0";
+      const offsetMatch = offsetValue.match(/^GMT([+-])(\d{1,2})(?::?(\d{2}))?$/);
+      const utcOffsetMinutes = offsetMatch
+        ? (offsetMatch[1] === "+" ? 1 : -1) *
+          (Number(offsetMatch[2]) * 60 + Number(offsetMatch[3] ?? "0"))
+        : 0;
+
+      return {
+        nowIso: now.toISOString(),
+        date: `${year}-${month}-${day}`,
+        time: `${hour}:${minute}:${second}`,
+        timeZone: resolvedTimeZone,
+        utcOffsetMinutes,
+        unixMs: now.getTime(),
+      };
+    },
+  },
   weather: {
     label: "Weather",
     description: "Get the weather in a location (fahrenheit)",
@@ -228,24 +358,63 @@ export const mobileToolDefinitions = {
   search_contacts: {
     label: "Search Contacts",
     description:
-      "Search the user's contacts by name and return a compact list of matching contacts.",
+      "Search the user's contacts by name and return a compact list of matching contacts. Use this when the user mentions a person by name and wants contact details from the device.",
     runtime: "mobile",
     domain: "contacts",
     platforms: ["ios", "android"],
     approvalMode: "auto",
     inputSchema: searchContactsInputSchema,
     outputSchema: searchContactsOutputSchema,
+    inputExamples: [
+      { input: { query: "Alex", limit: 5 } },
+      { input: { query: "Mom", limit: 3 } },
+    ],
   },
   get_upcoming_events: {
     label: "Upcoming Events",
     description:
-      "Get the user's upcoming calendar events for the next few days.",
+      "Get the user's upcoming calendar events for the next few days. Use this when the user asks what is on their calendar, what meetings are coming up, or whether they are free soon.",
     runtime: "mobile",
     domain: "calendar",
     platforms: ["ios", "android"],
     approvalMode: "auto",
     inputSchema: getUpcomingEventsInputSchema,
     outputSchema: getUpcomingEventsOutputSchema,
+    inputExamples: [
+      { input: { days: 3, limit: 10 } },
+      { input: { days: 7, limit: 5 } },
+    ],
+  },
+  create_calendar_event: {
+    label: "Create Calendar Event",
+    description:
+      "Create a new calendar event on the user's device after they explicitly approve it. Only use this when the user clearly wants to add something to their calendar and you already know the event title, start time, and end time as concrete ISO datetimes. If any of those are missing or ambiguous, ask follow-up questions first instead of guessing.",
+    runtime: "mobile",
+    domain: "calendar",
+    platforms: ["ios", "android"],
+    approvalMode: "confirm",
+    inputSchema: createCalendarEventInputSchema,
+    outputSchema: createCalendarEventOutputSchema,
+    inputExamples: [
+      {
+        input: {
+          title: "Dentist appointment",
+          startDate: "2026-03-07T09:00:00+08:00",
+          endDate: "2026-03-07T10:00:00+08:00",
+          location: "Central Clinic",
+          notes: "Bring insurance card",
+          allDay: false,
+        },
+      },
+      {
+        input: {
+          title: "Project kickoff",
+          startDate: "2026-03-08T14:00:00+08:00",
+          endDate: "2026-03-08T15:00:00+08:00",
+          allDay: false,
+        },
+      },
+    ],
   },
   get_current_location: {
     label: "Current Location",
@@ -276,6 +445,7 @@ function createAiTool(definition: ChatToolDefinition) {
       description: definition.description,
       inputSchema: definition.inputSchema,
       outputSchema: definition.outputSchema,
+      inputExamples: definition.inputExamples,
       execute: definition.execute,
       needsApproval: definition.approvalMode === "confirm",
     });
@@ -286,6 +456,7 @@ function createAiTool(definition: ChatToolDefinition) {
     description: definition.description,
     inputSchema: definition.inputSchema,
     outputSchema: definition.outputSchema ?? z.unknown(),
+    inputExamples: definition.inputExamples,
     needsApproval: definition.approvalMode === "confirm",
   });
 }
@@ -303,6 +474,18 @@ export const mobileToolNameSet = new Set<string>(
 
 export function isMobileToolName(toolName: string): toolName is MobileToolName {
   return mobileToolNameSet.has(toolName);
+}
+
+export function getToolApprovalMode(
+  toolName: string
+): ChatToolApprovalMode | undefined {
+  return (chatToolDefinitions as Record<string, ChatToolDefinition | undefined>)[
+    toolName
+  ]?.approvalMode;
+}
+
+export function toolRequiresConfirmation(toolName: string) {
+  return getToolApprovalMode(toolName) === "confirm";
 }
 
 export const toolLabels = Object.fromEntries(

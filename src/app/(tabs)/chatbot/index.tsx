@@ -1,14 +1,20 @@
 import { executeMobileTool } from "@/features/chat/tools/mobile-executors";
-import { isMobileToolName, toolLabels } from "@/features/chat/tools/registry";
+import {
+  isMobileToolName,
+  toolLabels,
+  toolRequiresConfirmation,
+} from "@/features/chat/tools/registry";
 import { generateAPIUrl } from "@/utils/APIURLGenerator";
 import { useChat } from "@ai-sdk/react";
 import {
   DefaultChatTransport,
+  isToolUIPart,
   lastAssistantMessageIsCompleteWithToolCalls,
+  type UIMessage,
 } from "ai";
 import { fetch as expoFetch } from "expo/fetch";
-import { useState } from "react";
-import { FlatList, Text, TextInput, View } from "react-native";
+import { useRef, useState } from "react";
+import { FlatList, Pressable, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 function getToolPartName(part: { type: string }) {
@@ -56,12 +62,44 @@ function formatDateTime(value: string) {
   return new Date(value).toLocaleString();
 }
 
+function formatToolInput(toolName: string | undefined, input: any) {
+  if (!toolName || !input) {
+    return JSON.stringify(input, null, 2);
+  }
+
+  switch (toolName) {
+    case "create_calendar_event":
+      return [
+        `Title: ${input.title}`,
+        `Starts: ${formatDateTime(input.startDate)}`,
+        `Ends: ${formatDateTime(input.endDate)}`,
+        `All day: ${input.allDay ? "yes" : "no"}`,
+        input.location ? `Location: ${input.location}` : null,
+        input.notes ? `Notes: ${input.notes}` : null,
+        input.calendarId
+          ? `Calendar ID: ${input.calendarId}`
+          : "Calendar: default writable calendar",
+      ]
+        .filter(Boolean)
+        .join("\n");
+    default:
+      return JSON.stringify(input, null, 2);
+  }
+}
+
 function formatToolOutput(toolName: string | undefined, output: any) {
   if (!toolName || !output) {
     return JSON.stringify(output, null, 2);
   }
 
   switch (toolName) {
+    case "get_current_time":
+      return [
+        `Date: ${output.date}`,
+        `Time: ${output.time}`,
+        `Timezone: ${output.timeZone}`,
+        `ISO: ${output.nowIso}`,
+      ].join("\n");
     case "get_today_steps":
       return [`Date: ${output.date}`, `Steps: ${output.steps} ${output.unit}`].join("\n");
     case "get_recent_sleep":
@@ -97,6 +135,18 @@ function formatToolOutput(toolName: string | undefined, output: any) {
             `- ${event.title} | ${formatDateTime(event.startDate)} | ${event.calendarTitle}${event.location ? ` | ${event.location}` : ""}`
         ),
       ].join("\n");
+    case "create_calendar_event":
+      return [
+        `Status: ${output.status}`,
+        `Calendar: ${output.calendarTitle}`,
+        `Title: ${output.title}`,
+        `Starts: ${formatDateTime(output.startDate)}`,
+        `Ends: ${formatDateTime(output.endDate)}`,
+        output.location ? `Location: ${output.location}` : null,
+        output.notes ? `Notes: ${output.notes}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n");
     case "get_current_location":
       return [
         `Coordinates: ${output.latitude}, ${output.longitude}`,
@@ -126,55 +176,197 @@ function renderToolState(part: any) {
     case "input-streaming":
       return "Preparing tool input...";
     case "input-available":
-      return part.input ? JSON.stringify(part.input, null, 2) : "Running tool...";
+      return part.input ? formatToolInput(toolName, part.input) : "Running tool...";
     case "output-available":
       return formatToolOutput(toolName, part.output);
     case "output-error":
       return part.errorText ?? "Tool execution failed.";
     case "approval-requested":
-      return "Waiting for user approval...";
+      return [
+        "Approval required before this tool can run.",
+        formatToolInput(toolName, part.input),
+      ].join("\n");
     case "approval-responded":
-      return JSON.stringify(part.approval, null, 2);
+      return [
+        part.approval?.approved ? "Approved on device." : "Denied on device.",
+        part.approval?.reason,
+        formatToolInput(toolName, part.input),
+      ]
+        .filter(Boolean)
+        .join("\n");
     default:
       return JSON.stringify(part, null, 2);
   }
 }
 
+function shouldAutoContinue(messages: UIMessage[]) {
+  if (lastAssistantMessageIsCompleteWithToolCalls({ messages })) {
+    return true;
+  }
+
+  const lastMessage = messages[messages.length - 1];
+
+  if (!lastMessage || lastMessage.role !== "assistant") {
+    return false;
+  }
+
+  const lastStepStartIndex = lastMessage.parts.reduce((lastIndex, part, index) => {
+    return part.type === "step-start" ? index : lastIndex;
+  }, -1);
+
+  const toolParts = lastMessage.parts
+    .slice(lastStepStartIndex + 1)
+    .filter(isToolUIPart);
+
+  if (toolParts.length === 0) {
+    return false;
+  }
+
+  const hasDeniedApproval = toolParts.some(
+    (part) =>
+      part.state === "approval-responded" && part.approval.approved === false
+  );
+
+  if (!hasDeniedApproval) {
+    return false;
+  }
+
+  return toolParts.every(
+    (part) =>
+      part.state === "output-available" ||
+      part.state === "output-error" ||
+      (part.state === "approval-responded" && part.approval.approved === false)
+  );
+}
+
+function hasApprovedToolCall(messages: UIMessage[], toolCallId: string) {
+  return messages.some((message) =>
+    message.parts.some(
+      (part) =>
+        isToolUIPart(part) &&
+        part.toolCallId === toolCallId &&
+        part.state === "approval-responded" &&
+        part.approval.approved
+    )
+  );
+}
+
+async function runApprovedMobileTool({
+  toolName,
+  toolCallId,
+  input,
+  addToolOutput,
+}: {
+  toolName: string;
+  toolCallId: string;
+  input: any;
+  addToolOutput: (payload: any) => void;
+}) {
+  if (!isMobileToolName(toolName)) {
+    return;
+  }
+
+  try {
+    const output = await executeMobileTool(toolName, input);
+
+    addToolOutput({
+      tool: toolName,
+      toolCallId,
+      output,
+    });
+  } catch (toolError) {
+    addToolOutput({
+      state: "output-error",
+      tool: toolName,
+      toolCallId,
+      errorText:
+        toolError instanceof Error
+          ? toolError.message
+          : "Unknown mobile tool error.",
+    });
+  }
+}
+
+function getToolCardClassName(part: any) {
+  if (part.state === "approval-requested") {
+    return "my-1 rounded-md border-l-4 border-amber-500 bg-amber-50 p-2 dark:bg-amber-950/30";
+  }
+
+  if (
+    part.state === "output-error" ||
+    (part.state === "approval-responded" && part.approval?.approved === false)
+  ) {
+    return "my-1 rounded-md border-l-4 border-red-500 bg-red-50 p-2 dark:bg-red-950/30";
+  }
+
+  return "my-1 rounded-md border-l-4 border-emerald-500 bg-emerald-50 p-2 dark:bg-emerald-950/30";
+}
+
+function getToolLabelClassName(part: any) {
+  if (part.state === "approval-requested") {
+    return "text-xs font-semibold text-amber-700 dark:text-amber-300";
+  }
+
+  if (
+    part.state === "output-error" ||
+    (part.state === "approval-responded" && part.approval?.approved === false)
+  ) {
+    return "text-xs font-semibold text-red-700 dark:text-red-300";
+  }
+
+  return "text-xs font-semibold text-emerald-600 dark:text-emerald-400";
+}
+
+function getToolBodyClassName(part: any) {
+  if (part.state === "approval-requested") {
+    return "font-mono text-xs text-amber-800 dark:text-amber-200";
+  }
+
+  if (
+    part.state === "output-error" ||
+    (part.state === "approval-responded" && part.approval?.approved === false)
+  ) {
+    return "font-mono text-xs text-red-800 dark:text-red-200";
+  }
+
+  return "font-mono text-xs text-emerald-700 dark:text-emerald-300";
+}
+
 export default function App() {
   const [input, setInput] = useState("");
-  const { addToolOutput, messages, error, sendMessage } = useChat({
+  const messagesRef = useRef<UIMessage[]>([]);
+  const {
+    addToolApprovalResponse,
+    addToolOutput,
+    messages,
+    error,
+    sendMessage,
+  } = useChat({
     transport: new DefaultChatTransport({
       fetch: expoFetch as unknown as typeof globalThis.fetch,
       api: generateAPIUrl("/api/chat"),
     }),
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+    sendAutomaticallyWhen: ({ messages }) => shouldAutoContinue(messages),
     onToolCall: async ({ toolCall }) => {
       if (toolCall.dynamic || !isMobileToolName(toolCall.toolName)) {
         return;
       }
 
-      try {
-        const output = await executeMobileTool(toolCall.toolName, toolCall.input);
-
-        addToolOutput({
-          tool: toolCall.toolName,
-          toolCallId: toolCall.toolCallId,
-          output,
-        });
-      } catch (toolError) {
-        addToolOutput({
-          state: "output-error",
-          tool: toolCall.toolName,
-          toolCallId: toolCall.toolCallId,
-          errorText:
-            toolError instanceof Error
-              ? toolError.message
-              : "Unknown mobile tool error.",
-        });
+      if (toolRequiresConfirmation(toolCall.toolName)) {
+        return;
       }
+
+      await runApprovedMobileTool({
+        toolName: toolCall.toolName,
+        toolCallId: toolCall.toolCallId,
+        input: toolCall.input,
+        addToolOutput,
+      });
     },
     onError: (chatError) => console.error(chatError, "ERROR"),
   });
+
+  messagesRef.current = messages;
 
   if (error) return <Text className="text-red-500">{error.message}</Text>;
 
@@ -226,24 +418,79 @@ export default function App() {
                         </View>
                       );
                     default:
-                      if (!part.type.startsWith("tool-")) {
+                      if (!isToolUIPart(part)) {
                         return null;
                       }
 
-                      return (
-                        <View
-                          key={partKey}
-                          className="my-1 rounded-md border-l-4 border-emerald-500 bg-emerald-50 p-2 dark:bg-emerald-950/30"
-                        >
-                          <Text className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                            {getToolLabel(part)}
-                          </Text>
-                          <Text className="font-mono text-xs text-emerald-700 dark:text-emerald-300">
-                            {renderToolState(part)}
-                          </Text>
-                        </View>
-                      );
-                  }
+                       return (
+                         <View
+                           key={partKey}
+                           className={getToolCardClassName(part)}
+                         >
+                           <Text className={getToolLabelClassName(part)}>
+                             {getToolLabel(part)}
+                           </Text>
+                           <Text className={getToolBodyClassName(part)}>
+                             {renderToolState(part)}
+                           </Text>
+                            {part.state === "approval-requested" ? (
+                              <View className="mt-2 flex-row gap-2">
+                                <Pressable
+                                  className="flex-1 rounded-md bg-emerald-600 px-3 py-2"
+                                  onPress={() => {
+                                    if (
+                                      !hasApprovedToolCall(
+                                        messagesRef.current,
+                                        part.toolCallId
+                                      )
+                                    ) {
+                                      void (async () => {
+                                        const toolName = getToolPartName(part);
+
+                                        if (!toolName) {
+                                          return;
+                                        }
+
+                                        await addToolApprovalResponse({
+                                          id: part.approval.id,
+                                          approved: true,
+                                          reason:
+                                            "User approved the tool on device.",
+                                        });
+
+                                        await runApprovedMobileTool({
+                                          toolName,
+                                          toolCallId: part.toolCallId,
+                                          input: part.input,
+                                          addToolOutput,
+                                        });
+                                      })();
+                                    }
+                                  }}
+                                >
+                                  <Text className="text-center text-sm font-semibold text-white">
+                                    Approve
+                                 </Text>
+                               </Pressable>
+                               <Pressable
+                                 className="flex-1 rounded-md border border-red-300 bg-white px-3 py-2 dark:border-red-800 dark:bg-neutral-900"
+                                 onPress={() => {
+                                   void addToolApprovalResponse({
+                                     id: part.approval.id,
+                                     approved: false,
+                                     reason: "User denied calendar change on device.",
+                                   });
+                                 }}
+                               >
+                                 <Text className="text-center text-sm font-semibold text-red-700 dark:text-red-300">
+                                   Deny
+                                 </Text>
+                               </Pressable>
+                             </View>
+                           ) : null}
+                         </View>
+                       );
+                   }
                 })}
               </View>
             </View>
