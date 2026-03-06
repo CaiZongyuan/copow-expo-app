@@ -9,11 +9,14 @@
     "lint": "expo lint"
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "^2.0.35",
+    "@ai-sdk/react": "^3.0.118",
     "@gorhom/bottom-sheet": "^5.2.8",
     "@kingstinct/react-native-healthkit": "^13.2.3",
     "@react-navigation/bottom-tabs": "^7.7.3",
     "@react-navigation/elements": "^2.8.1",
     "@react-navigation/native": "^7.1.28",
+    "ai": "^6.0.116",
     "expo": "~55.0.5",
     "expo-calendar": "~55.0.9",
     "expo-constants": "~55.0.7",
@@ -51,10 +54,13 @@
     "tailwind-merge": "^3.4.0",
     "tailwind-variants": "^3.2.2",
     "tailwindcss": "^4.2.1",
-    "uniwind": "^1.5.0"
+    "uniwind": "^1.5.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
+    "eslint": "^9.0.0",
+    "eslint-config-expo": "~55.0.0",
     "typescript": "~5.9.2"
   },
   "private": true
