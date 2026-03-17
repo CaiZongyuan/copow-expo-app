@@ -1,7 +1,11 @@
 import { executeMobileTool } from "@/features/chat/tools/mobile-executors";
 import {
+  formatToolApproval,
+  formatToolError,
+  formatToolInput,
+  formatToolOutput,
+  getToolLabel,
   isMobileToolName,
-  toolLabels,
   toolRequiresConfirmation,
 } from "@/features/chat/tools/registry";
 import { generateAPIUrl } from "@/utils/APIURLGenerator";
@@ -14,21 +18,15 @@ import {
 } from "ai";
 import { fetch as expoFetch } from "expo/fetch";
 import { useRef, useState } from "react";
-import { FlatList, Pressable, Text, TextInput, View } from "react-native";
+import { FlatList, Platform, Pressable, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 function getToolPartName(part: { type: string }) {
   return part.type.startsWith("tool-") ? part.type.slice(5) : undefined;
 }
 
-function getToolLabel(part: { type: string }) {
-  const toolName = getToolPartName(part);
-
-  if (!toolName) {
-    return "Tool";
-  }
-
-  return toolLabels[toolName as keyof typeof toolLabels] ?? toolName;
+function getToolPartLabel(part: { type: string }) {
+  return getToolLabel(getToolPartName(part));
 }
 
 function getMessageKey(messageId: string, messageIndex: number) {
@@ -43,175 +41,6 @@ function getMessagePartKey(
   return `${messageIndex}-${messageId}-${partIndex}`;
 }
 
-function minutesToReadableDuration(totalMinutes: number) {
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-
-  if (hours <= 0) {
-    return `${minutes}m`;
-  }
-
-  if (minutes === 0) {
-    return `${hours}h`;
-  }
-
-  return `${hours}h ${minutes}m`;
-}
-
-function formatDateTime(value: string) {
-  return new Date(value).toLocaleString();
-}
-
-function formatToolInput(toolName: string | undefined, input: any) {
-  if (!toolName || !input) {
-    return JSON.stringify(input, null, 2);
-  }
-
-  switch (toolName) {
-    case "list_writable_calendars":
-      return [`Include hidden: ${input.includeHidden ? "yes" : "no"}`].join(
-        "\n"
-      );
-    case "open_external_url":
-      return [
-        input.label ? `Label: ${input.label}` : null,
-        input.appName ? `App: ${input.appName}` : null,
-        input.intent ? `Intent: ${input.intent}` : null,
-        `URL: ${input.url}`,
-        input.fallbackUrl ? `Fallback: ${input.fallbackUrl}` : null,
-      ]
-        .filter(Boolean)
-        .join("\n");
-    case "create_calendar_event":
-      return [
-        `Title: ${input.title}`,
-        `Starts: ${formatDateTime(input.startDate)}`,
-        `Ends: ${formatDateTime(input.endDate)}`,
-        `All day: ${input.allDay ? "yes" : "no"}`,
-        input.location ? `Location: ${input.location}` : null,
-        input.notes ? `Notes: ${input.notes}` : null,
-        input.calendarId
-          ? `Calendar ID: ${input.calendarId}`
-          : "Calendar: default writable calendar",
-      ]
-        .filter(Boolean)
-        .join("\n");
-    default:
-      return JSON.stringify(input, null, 2);
-  }
-}
-
-function formatToolOutput(toolName: string | undefined, output: any) {
-  if (!toolName || !output) {
-    return JSON.stringify(output, null, 2);
-  }
-
-  switch (toolName) {
-    case "get_current_time":
-      return [
-        `Date: ${output.date}`,
-        `Time: ${output.time}`,
-        `Timezone: ${output.timeZone}`,
-        `ISO: ${output.nowIso}`,
-      ].join("\n");
-    case "list_writable_calendars":
-      return [
-        `Writable calendars: ${output.total}`,
-        ...(output.calendars ?? []).map((calendar: any) => {
-          const details = [
-            calendar.sourceName,
-            calendar.ownerAccount,
-            calendar.isPrimary ? "primary" : null,
-            calendar.isVisible ? null : "hidden",
-          ]
-            .filter(Boolean)
-            .join(" | ");
-
-          return details
-            ? `- ${calendar.title} | ${details}`
-            : `- ${calendar.title}`;
-        }),
-      ].join("\n");
-    case "open_external_url":
-      return [
-        `Status: ${output.status}`,
-        output.appName ? `App: ${output.appName}` : null,
-        output.intent ? `Intent: ${output.intent}` : null,
-        output.label ? `Label: ${output.label}` : null,
-        `Opened: ${output.openedUrl}`,
-        output.usedFallback ? `Requested: ${output.requestedUrl}` : null,
-      ]
-        .filter(Boolean)
-        .join("\n");
-    case "get_today_steps":
-      return [`Date: ${output.date}`, `Steps: ${output.steps} ${output.unit}`].join("\n");
-    case "get_recent_sleep":
-      return [
-        `Days checked: ${output.days}`,
-        `Sleep entries: ${output.sampleCount}`,
-        `Total sleep: ${minutesToReadableDuration(output.totalSleepMinutes)}`,
-        ...(output.entries ?? [])
-          .slice(0, 5)
-          .map(
-            (entry: any) =>
-              `- ${entry.stage}: ${minutesToReadableDuration(entry.durationMinutes)} (${formatDateTime(entry.startDate)})`
-          ),
-      ].join("\n");
-    case "search_contacts":
-      return [
-        `Query: ${output.query}`,
-        `Matches: ${output.total}`,
-        ...(output.contacts ?? []).map((contact: any) => {
-          const phone = contact.phoneNumbers?.[0] ? ` | ${contact.phoneNumbers[0]}` : "";
-          const email = contact.emails?.[0] ? ` | ${contact.emails[0]}` : "";
-          const company = contact.company ? ` (${contact.company})` : "";
-
-          return `- ${contact.name}${company}${phone}${email}`;
-        }),
-      ].join("\n");
-    case "get_upcoming_events":
-      return [
-        `Window: ${formatDateTime(output.rangeStart)} -> ${formatDateTime(output.rangeEnd)}`,
-        `Events: ${output.total}`,
-        ...(output.events ?? []).map(
-          (event: any) =>
-            `- ${event.title} | ${formatDateTime(event.startDate)} | ${event.calendarTitle}${event.location ? ` | ${event.location}` : ""}`
-        ),
-      ].join("\n");
-    case "create_calendar_event":
-      return [
-        `Status: ${output.status}`,
-        `Calendar: ${output.calendarTitle}`,
-        `Title: ${output.title}`,
-        `Starts: ${formatDateTime(output.startDate)}`,
-        `Ends: ${formatDateTime(output.endDate)}`,
-        output.location ? `Location: ${output.location}` : null,
-        output.notes ? `Notes: ${output.notes}` : null,
-      ]
-        .filter(Boolean)
-        .join("\n");
-    case "get_current_location":
-      return [
-        `Coordinates: ${output.latitude}, ${output.longitude}`,
-        `Accuracy: ${output.accuracy ?? "unknown"}`,
-        output.address?.formattedAddress
-          ? `Address: ${output.address.formattedAddress}`
-          : output.address
-            ? `Address: ${[
-                output.address.name,
-                output.address.city,
-                output.address.region,
-                output.address.country,
-              ]
-                .filter(Boolean)
-                .join(", ")}`
-            : "Address: unavailable",
-      ].join("\n");
-    default:
-      return JSON.stringify(output, null, 2);
-  }
-}
-
 function renderToolState(part: any) {
   const toolName = getToolPartName(part);
 
@@ -223,17 +52,14 @@ function renderToolState(part: any) {
     case "output-available":
       return formatToolOutput(toolName, part.output);
     case "output-error":
-      return part.errorText ?? "Tool execution failed.";
+      return formatToolError(toolName, part.errorText ?? "Tool execution failed.");
     case "approval-requested":
-      return [
-        "Approval required before this tool can run.",
-        formatToolInput(toolName, part.input),
-      ].join("\n");
+      return formatToolApproval(toolName, part.input);
     case "approval-responded":
       return [
         part.approval?.approved ? "Approved on device." : "Denied on device.",
         part.approval?.reason,
-        formatToolInput(toolName, part.input),
+        formatToolApproval(toolName, part.input),
       ]
         .filter(Boolean)
         .join("\n");
@@ -386,7 +212,16 @@ export default function App() {
     sendMessage,
   } = useChat({
     transport: new DefaultChatTransport({
-      fetch: expoFetch as unknown as typeof globalThis.fetch,
+      fetch: async (input, init) => {
+        const headers = new Headers(init?.headers);
+
+        headers.set("x-chat-platform", Platform.OS);
+
+        return (expoFetch as unknown as typeof globalThis.fetch)(input, {
+          ...init,
+          headers,
+        });
+      },
       api: generateAPIUrl("/api/chat"),
     }),
     sendAutomaticallyWhen: ({ messages }) => shouldAutoContinue(messages),
@@ -471,7 +306,7 @@ export default function App() {
                            className={getToolCardClassName(part)}
                          >
                            <Text className={getToolLabelClassName(part)}>
-                             {getToolLabel(part)}
+                             {getToolPartLabel(part)}
                            </Text>
                            <Text className={getToolBodyClassName(part)}>
                              {renderToolState(part)}

@@ -247,6 +247,16 @@ The important change is not the exact folder names. The important change is remo
 - `Completed`: decided to adopt agent-clip's principles selectively instead of replacing typed mobile tools with a single `run(command)` interface.
 - `Completed`: recorded a layered upgrade direction for manifests, dynamic tool exposure, executors, formatters, and app-skill resolvers.
 - `Completed`: generated the Phase 7 delivery contract docs in `docs/prd/mobile-agent-tooling-architecture-upgrade.md`, `docs/api/mobile-agent-tooling-architecture-upgrade.md`, and `docs/ui/mobile-agent-tooling-architecture-upgrade.md`.
+- `Completed`: created GitHub Epic `#1` and implementation task `#2` for the Phase 7 tooling architecture upgrade so the PRD now has issue-level tracking.
+- `Completed`: initialized Harness state files and mapped issue `#2` to `harness-tasks.json` task `task-001`.
+- `Completed`: generated `tests/mobile-agent-tooling-architecture-upgrade-test-cases.md` as the executable QA contract for the Phase 7 MVP slice.
+- `Completed`: extracted shared tool contracts into `src/features/chat/tools/types.ts`, plus manifest, builder, and presentation modules under `src/features/chat/tools/`.
+- `Completed`: split mobile execution into domain modules under `src/features/chat/tools/executors/mobile/` and reduced `src/features/chat/tools/mobile-executors.ts` to a compatibility re-export.
+- `Completed`: converted `src/features/chat/tools/registry.ts` into a thin facade that re-exports manifests, builders, and manifest-driven formatting helpers.
+- `Completed`: moved chat tool input/output/approval/error formatting out of `src/app/(tabs)/chatbot/index.tsx` and into registry-owned presentation metadata.
+- `Completed`: switched `src/app/api/chat+api.ts` from static `chatTools` import to `buildToolContext(...)` + `buildChatTools(context)` and started passing client platform context via request headers.
+- `Completed`: added `tests/mobile-agent-tooling-architecture-upgrade.contract.ts` as a lightweight contract check compiled by `npx tsc --noEmit`.
+- `Completed`: excluded `ref/` from the app TypeScript program so project validation reflects product code rather than archived reference code.
 - `Recorded`: foreground streaming chat can be interrupted when the app backgrounds; this is an expected limitation of the current transport model and is not being solved in the current slice.
 - `Recorded`: future product direction requires every session to become a resumable/background-capable agent task rather than a foreground-only stream.
 - `Recorded`: future product direction also requires multiple concurrent sessions plus session persistence.
@@ -287,6 +297,8 @@ The important change is not the exact folder names. The important change is remo
 - Plan for a session model where one user can own multiple agent sessions concurrently, each with its own goal, state, tool history, and resumable lifecycle.
 - Session persistence is a first-class future requirement because autonomous agent work cannot depend on one foreground screen remaining open.
 - The next app-integration phase should use an app skills / capability registry plus low-level `open_external_url` execution, with detailed design tracked in `docs/mobile-agent-app-skills-registry-plan.md`.
+- Phase 7 implementation is being tracked through GitHub Epic `#1`, task issue `#2`, and Harness task `task-001` so the work can resume cleanly across sessions.
+- For this repository state, Phase 7 validation will use `bun run lint` and `npx tsc --noEmit` as objective checks, with additional manual verification for tool-card rendering because there is no dedicated unit-test runner yet.
 
 ## Implementation Notes
 
@@ -312,15 +324,12 @@ The important change is not the exact folder names. The important change is remo
 
 ## Next Steps
 
-1. Add platform and permission fallback copy for unsupported environments.
-2. Extract shared tool types and move toward manifest files instead of keeping every tool definition inside `src/features/chat/tools/registry.ts`.
-3. Introduce a `buildChatTools(context)` step so the server can expose only the relevant tool subset for the current platform and capability scope.
-4. Move tool-specific input/output formatting out of `src/app/(tabs)/chatbot/index.tsx` and into registry-owned formatter metadata.
-5. Extract reusable permission helpers and normalized error mappers for all mobile tool domains.
-6. Reuse the confirmation flow for the next sensitive tools such as `pick_document` and `pick_image`.
-7. Consider richer event-targeting inputs later, such as duration defaults, natural-language time resolution, or smarter calendar selection over `list_writable_calendars` results.
-8. If calendar creation still feels brittle in practice, consider adding a stronger confirmation summary generated from structured event inputs before execution.
-9. Design a real session/task layer for mobile agents, including background-capable execution semantics, multiple concurrent sessions, and explicit lifecycle states.
-10. Design persistence for sessions, messages, tool calls, pending approvals, and task progress so agent work can survive app backgrounding or process death.
-11. Implement the app skills / capability registry design in `docs/mobile-agent-app-skills-registry-plan.md`, starting with `open_external_url`, `list_writable_calendars`, Apple Maps, AMap, and DiDi.
-12. Continue updating this file as each phase lands.
+1. Finish extracting shared tool types and manifest files so `src/features/chat/tools/registry.ts` becomes a thin facade.
+2. Create the PR for issue `#2`, run the review loop, and merge once checks are green.
+3. Reuse the confirmation flow for the next sensitive tools such as `pick_document` and `pick_image`.
+4. Consider richer event-targeting inputs later, such as duration defaults, natural-language time resolution, or smarter calendar selection over `list_writable_calendars` results.
+5. If calendar creation still feels brittle in practice, consider adding a stronger confirmation summary generated from structured event inputs before execution.
+6. Design a real session/task layer for mobile agents, including background-capable execution semantics, multiple concurrent sessions, and explicit lifecycle states.
+7. Design persistence for sessions, messages, tool calls, pending approvals, and task progress so agent work can survive app backgrounding or process death.
+8. Implement the app skills / capability registry design in `docs/mobile-agent-app-skills-registry-plan.md`, starting with `open_external_url`, `list_writable_calendars`, Apple Maps, AMap, and DiDi.
+9. Continue updating this file as each phase lands.

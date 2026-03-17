@@ -44,3 +44,5 @@ app-example
 
 
 ref/
+.harness-active
+harness-tasks.json.bak
