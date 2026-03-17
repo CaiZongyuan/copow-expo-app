@@ -26,6 +26,35 @@
       "error_log": [],
       "checkpoints": [],
       "completed_at": "2026-03-17T03:18:08Z"
+    },
+    {
+      "id": "task-002",
+      "title": "Issue #4: prevent chat stream crashes on provider timeout and rate limit",
+      "status": "in_progress",
+      "priority": "P1",
+      "depends_on": [],
+      "attempts": 0,
+      "max_attempts": 3,
+      "started_at_commit": "63fc105e0ae11629392a70bd22399cd9de9c07ad",
+      "validation": {
+        "command": "cmd /c \"bun run lint && npx tsc --noEmit\"",
+        "timeout_seconds": 300
+      },
+      "on_failure": {
+        "cleanup": null
+      },
+      "error_log": [],
+      "checkpoints": [
+        {
+          "step": 2,
+          "total": 4,
+          "description": "Chat stream error hardening implemented; lint + tsc passed; preparing commit and PR",
+          "timestamp": "2026-03-17T03:40:06Z"
+        }
+      ],
+      "completed_at": null,
+      "claimed_by": "codex-main",
+      "claimed_at": "2026-03-17T03:35:33Z"
     }
   ],
   "session_count": 0,

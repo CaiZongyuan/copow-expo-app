@@ -207,9 +207,11 @@ export default function App() {
   const {
     addToolApprovalResponse,
     addToolOutput,
+    clearError,
     messages,
     error,
     sendMessage,
+    status,
   } = useChat({
     transport: new DefaultChatTransport({
       fetch: async (input, init) => {
@@ -241,12 +243,13 @@ export default function App() {
         addToolOutput,
       });
     },
-    onError: (chatError) => console.error(chatError, "ERROR"),
+    onError: (chatError) => {
+      console.error("[chatbot] request failed", chatError);
+    },
   });
 
   messagesRef.current = messages;
-
-  if (error) return <Text className="text-red-500">{error.message}</Text>;
+  const isSending = status === "submitted" || status === "streaming";
 
   return (
     <SafeAreaView className="h-full bg-white dark:bg-neutral-950">
@@ -376,17 +379,37 @@ export default function App() {
         />
 
         <View className="mt-2">
+          {error ? (
+            <View className="mb-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 dark:border-red-900 dark:bg-red-950/30">
+              <Text className="text-sm text-red-700 dark:text-red-300">
+                {error.message}
+              </Text>
+            </View>
+          ) : null}
           <TextInput
             className="rounded-md border border-neutral-200 bg-white px-3 py-2 text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
-            placeholder="Say something..."
+            placeholder={
+              isSending ? "Assistant is responding..." : "Say something..."
+            }
             placeholderTextColor="#9ca3af"
             value={input}
-            onChange={(event) => setInput(event.nativeEvent.text)}
+            editable={!isSending}
+            onChange={(event) => {
+              if (error) {
+                clearError();
+              }
+
+              setInput(event.nativeEvent.text);
+            }}
             onSubmitEditing={(event) => {
               event.preventDefault();
 
-              if (!input.trim()) {
+              if (isSending || !input.trim()) {
                 return;
+              }
+
+              if (error) {
+                clearError();
               }
 
               sendMessage({ text: input });
