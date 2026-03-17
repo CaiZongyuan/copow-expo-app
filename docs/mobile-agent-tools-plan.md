@@ -10,6 +10,9 @@ The current chat flow already supports model tool calling, but only with server-
 
 - Chat requests are sent from `src/app/(tabs)/chatbot/index.tsx` using `useChat` and `DefaultChatTransport`.
 - The API route `src/app/api/chat+api.ts` uses `streamText` and defines only two server-executed tools: `weather` and `convertFahrenheitToCelsius`.
+- `src/features/chat/tools/registry.ts` is currently a flat, centralized catalog that mixes tool metadata, model-facing descriptions, Zod schemas, approval policy, and some server execution logic in one file.
+- Tool execution knowledge is split across multiple places: `registry.ts` defines the catalog, `mobile-executors.ts` runs client tools, and `src/app/(tabs)/chatbot/index.tsx` contains separate input/output formatting and approval rendering rules.
+- The server currently exposes one mostly static tool catalog rather than selecting a smaller toolset based on platform, permission state, session goal, or app capability context.
 - Installed mobile capability packages already cover several valuable tool domains:
   - HealthKit via `@kingstinct/react-native-healthkit`
   - Contacts via `expo-contacts`
@@ -77,6 +80,129 @@ This means the app should use AI SDK's client-side tool flow:
 - Add session persistence so unfinished agent work, tool state, and results survive app backgrounding, process death, and later resume.
 - Distinguish UI presence from task execution so a session can continue conceptually even when its chat screen is not open.
 
+### Phase 7 - Tooling architecture upgrade
+
+- Refactor the flat registry into layered modules: capability manifests, exposure builders, executors, formatters, and safety guards.
+- Keep typed AI SDK tools as the public contract, but borrow agent-clip's principles of progressive discovery, actionable errors, and strict separation between execution and presentation.
+- Introduce dynamic tool exposure so the server can provide only the relevant subset of tools for the current platform, capability set, and task context.
+- Move tool input/output formatting and approval summaries out of the chat screen into registry-owned metadata so tool behavior and tool presentation do not drift apart.
+- Add a structured capability knowledge layer for higher-level app workflows so low-level tools like `open_external_url` stay small and deterministic.
+
+## Tooling Architecture Upgrade
+
+The reference design in `ref/Tools-design.md` and `ref/agent-clip/` is valuable mainly for its principles, not for a literal one-tool `run(command)` port.
+
+For this Expo mobile app, a single stringly-typed command tool would be a regression because the current product depends on:
+
+- typed JSON schemas for provider compatibility and safer tool calling,
+- approval-aware UI for sensitive actions,
+- device permission boundaries,
+- and compact, structured tool outputs that the client can render consistently.
+
+The recommended upgrade is therefore a hybrid model.
+
+### Layer 1 - Capability manifests
+
+Keep one canonical definition per capability, but make the manifest more explicit than the current `ChatToolDefinition`.
+
+Suggested additional fields:
+
+- `whenToUse`
+- `whenNotToUse`
+- `riskLevel`
+- `permissions`
+- `requiresFollowUp`
+- `availability`
+- `resolver`
+- `formatInput`
+- `formatOutput`
+- `mapError`
+
+This layer should describe what a tool is, not how the chat UI renders it or how the platform executes it.
+
+### Layer 2 - Exposure builder
+
+Add a builder such as `buildChatTools(context)` that decides which tools are actually shown to the model for a given request.
+
+Recommended inputs:
+
+- platform (`ios`, `android`, `web`)
+- known capability flags
+- active session/tool domain
+- future app-skill availability summaries
+
+This borrows the "progressive disclosure" idea from agent-clip without forcing a CLI interface. Instead of exposing the whole registry every turn, expose the smallest useful toolset.
+
+### Layer 3 - Executors and guards
+
+Keep low-level execution deterministic and separate from model-facing metadata.
+
+Responsibilities:
+
+- permission checks
+- platform checks
+- confirmation gating
+- native module execution
+- normalized success payloads
+- normalized actionable errors
+
+This is the mobile equivalent of agent-clip's execution layer: do the real work here, but do not mix presentation concerns into it.
+
+### Layer 4 - Presentation metadata
+
+The current chat screen has switch statements for `formatToolInput` and `formatToolOutput`. That will become brittle as the catalog grows.
+
+Move those per-tool formatters into the tool manifests so:
+
+- approval cards,
+- compact result rendering,
+- and debug visibility
+
+all come from the same source of truth as the tool definition itself.
+
+### Layer 5 - Skills and resolvers above raw tools
+
+Do not expose every low-level primitive as if it were the final product interface.
+
+Recommended split:
+
+- low-level execution tools remain narrow and deterministic, such as `open_external_url`, `list_writable_calendars`, `get_current_location`
+- higher-level capability knowledge lives in file-backed app skills / resolver docs, such as maps, ride-hailing, and future workflow-specific capability files
+
+This matches the existing direction in `docs/mobile-agent-app-skills-registry-plan.md` and keeps the model from over-relying on ad-hoc descriptions inside one registry file.
+
+### Suggested file split
+
+One reasonable target layout is:
+
+```text
+src/features/chat/tools/
+  types.ts
+  manifests/
+    server.ts
+    mobile.ts
+    app-actions.ts
+  builders/
+    build-chat-tools.ts
+    build-tool-context.ts
+  executors/
+    mobile/
+      health.ts
+      calendar.ts
+      contacts.ts
+      location.ts
+      external.ts
+    server/
+      time.ts
+  formatters/
+    input.ts
+    output.ts
+    errors.ts
+  registry.ts
+```
+
+The important change is not the exact folder names. The important change is removing the current three-way split where tool definition, execution, and rendering drift independently.
+
 ## Proposed First Tool Set
 
 ### Read-only tools
@@ -117,6 +243,9 @@ This means the app should use AI SDK's client-side tool flow:
 - `Completed`: fixed the approval execution gap for confirm-only client tools by executing the approved mobile tool directly on-device after the user presses Approve, instead of assuming the server will re-run a tool that has no server-side `execute` handler.
 - `Completed`: implemented `open_external_url` as a confirm-only mobile tool with primary/fallback URL support, explicit scheme validation, and compact chat summaries.
 - `Completed`: implemented `list_writable_calendars` as a read-only calendar helper so the agent can inspect writable calendars before choosing a target for event creation.
+- `Completed`: reviewed the current flat tool registry against the `ref/Tools-design.md` and `ref/agent-clip/` reference design.
+- `Completed`: decided to adopt agent-clip's principles selectively instead of replacing typed mobile tools with a single `run(command)` interface.
+- `Completed`: recorded a layered upgrade direction for manifests, dynamic tool exposure, executors, formatters, and app-skill resolvers.
 - `Recorded`: foreground streaming chat can be interrupted when the app backgrounds; this is an expected limitation of the current transport model and is not being solved in the current slice.
 - `Recorded`: future product direction requires every session to become a resumable/background-capable agent task rather than a foreground-only stream.
 - `Recorded`: future product direction also requires multiple concurrent sessions plus session persistence.
@@ -129,6 +258,9 @@ This means the app should use AI SDK's client-side tool flow:
 - Expo Go / dev-client / native-build differences can affect which tools are actually available.
 - `create_calendar_event` currently requires the model to already know `title`, `startDate`, and `endDate`; ambiguous requests still need the assistant to ask follow-up questions first.
 - AI SDK approval handling behaves differently for local/client tools versus provider/server-executed tools; for local tools without `execute`, an approval response alone does not create a tool result.
+- The flat registry shape does not scale well as more tools, app integrations, and workflow-specific rules are added, because metadata, execution, and presentation logic are already split across multiple files.
+- Tool rendering logic in `src/app/(tabs)/chatbot/index.tsx` duplicates tool-specific knowledge that should live next to the tool definitions.
+- A static always-expose catalog increases tool-selection load for the model and makes it harder to give the assistant a sharp, context-relevant capability boundary.
 - The current foreground streaming model is a mismatch for long-running autonomous agent work because mobile OS backgrounding can suspend the JS runtime and interrupt network streams.
 - A future multi-session architecture will need explicit orchestration, cancellation, persistence, and resume semantics instead of assuming one active in-memory chat stream.
 - `open_external_url` currently validates explicit URL schemes and blocks obviously unsafe schemes such as `javascript:`, `data:`, and `file:`, but it does not yet implement a full app-specific allowlist or install-detection layer.
@@ -142,6 +274,10 @@ This means the app should use AI SDK's client-side tool flow:
 - Start with read-only health tools because they are high-value and technically representative.
 - Preserve implementation context in `docs/` on each meaningful phase.
 - Keep tool definitions centralized so server route registration and client execution can evolve from one source of truth.
+- Do not replace the mobile tool surface with a single `run(command)` tool; keep typed AI SDK tools as the public interface.
+- Reuse agent-clip's deeper ideas instead: progressive capability disclosure, strong corrective errors, and execution/presentation separation.
+- Evolve the current registry into a layered system of manifests, exposure builders, executors, formatters, and resolver-backed app skills.
+- Treat low-level tools as execution primitives and keep higher-level workflow knowledge in separate capability docs or resolvers instead of inflating tool descriptions.
 - Use AI SDK approval responses as the gate for confirm-only mobile tools, and only execute those tools on-device after the related approval has been recorded in chat state.
 - Give the model a concrete notion of current time in two ways: a stamped system prompt and a deterministic `get_current_time` tool.
 - Add tool input examples to complex tools and use middleware to fold those examples into tool descriptions for providers that ignore native `inputExamples` support.
@@ -175,11 +311,14 @@ This means the app should use AI SDK's client-side tool flow:
 ## Next Steps
 
 1. Add platform and permission fallback copy for unsupported environments.
-2. Consider extracting reusable permission helpers for all mobile tool domains.
-3. Reuse the new confirmation flow for the next sensitive tools such as `pick_document` and `pick_image`.
-4. Consider richer event-targeting inputs later, such as duration defaults, natural-language time resolution, or smarter calendar selection over `list_writable_calendars` results.
-5. If calendar creation still feels brittle in practice, consider adding a stronger confirmation summary generated from structured event inputs before execution.
-6. Design a real session/task layer for mobile agents, including background-capable execution semantics, multiple concurrent sessions, and explicit lifecycle states.
-7. Design persistence for sessions, messages, tool calls, pending approvals, and task progress so agent work can survive app backgrounding or process death.
-8. Implement the app skills / capability registry design in `docs/mobile-agent-app-skills-registry-plan.md`, starting with `open_external_url`, `list_writable_calendars`, Apple Maps, AMap, and DiDi.
-9. Continue updating this file as each phase lands.
+2. Extract shared tool types and move toward manifest files instead of keeping every tool definition inside `src/features/chat/tools/registry.ts`.
+3. Introduce a `buildChatTools(context)` step so the server can expose only the relevant tool subset for the current platform and capability scope.
+4. Move tool-specific input/output formatting out of `src/app/(tabs)/chatbot/index.tsx` and into registry-owned formatter metadata.
+5. Extract reusable permission helpers and normalized error mappers for all mobile tool domains.
+6. Reuse the confirmation flow for the next sensitive tools such as `pick_document` and `pick_image`.
+7. Consider richer event-targeting inputs later, such as duration defaults, natural-language time resolution, or smarter calendar selection over `list_writable_calendars` results.
+8. If calendar creation still feels brittle in practice, consider adding a stronger confirmation summary generated from structured event inputs before execution.
+9. Design a real session/task layer for mobile agents, including background-capable execution semantics, multiple concurrent sessions, and explicit lifecycle states.
+10. Design persistence for sessions, messages, tool calls, pending approvals, and task progress so agent work can survive app backgrounding or process death.
+11. Implement the app skills / capability registry design in `docs/mobile-agent-app-skills-registry-plan.md`, starting with `open_external_url`, `list_writable_calendars`, Apple Maps, AMap, and DiDi.
+12. Continue updating this file as each phase lands.

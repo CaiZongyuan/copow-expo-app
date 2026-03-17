@@ -22,7 +22,8 @@ const qwen = createOpenAICompatible({
 });
 
 const qwenWithToolExamples = wrapLanguageModel({
-  model: qwen.chatModel("qwen/qwen3.5-9b"),
+  // model: qwen.chatModel("qwen/qwen3.5-9b"),
+  model: glm.chatModel("glm-4.7"),
   middleware: addToolInputExamplesMiddleware(),
 });
 
@@ -34,8 +35,7 @@ export async function POST(req: Request) {
   const result = streamText({
     // model: glm.chatModel("glm-4.7"),
     model: qwenWithToolExamples,
-    system:
-      `You are a mobile assistant inside an Expo app. ${currentTimeLine} Use the available tools whenever the user asks for real device data such as weather, HealthKit sleep data, step count, contacts, calendar events, current time, or current location. For write actions like creating calendar events, ask follow-up questions until the event title, start time, and end time are clear and concrete. Prefer the current-time tool whenever the user asks about now, today, or needs a precise time reference. If a tool approval is denied, do not immediately retry the same tool unless the user explicitly asks again.`,
+    system: `You are a mobile assistant inside an Expo app. ${currentTimeLine} Use the available tools whenever the user asks for real device data such as weather, HealthKit sleep data, step count, contacts, calendar events, current time, or current location. For write actions like creating calendar events, ask follow-up questions until the event title, start time, and end time are clear and concrete. Prefer the current-time tool whenever the user asks about now, today, or needs a precise time reference. If a tool approval is denied, do not immediately retry the same tool unless the user explicitly asks again.`,
     messages: await convertToModelMessages(messages),
     // providerOptions: {
     //   glm: {
@@ -45,7 +45,7 @@ export async function POST(req: Request) {
     // onChunk: ({ chunk }) => {
     //   console.log("[chat+api] stream chunk", chunk);
     // },
-    stopWhen: stepCountIs(5),
+    stopWhen: stepCountIs(8),
     tools: chatTools,
   });
 
