@@ -2,3 +2,6 @@
 [2026-03-17T03:03:04Z] CLAIM [task-001] Issue #2: Phase 7 tools layered architecture MVP worker=codex-main base=0b931acc6093e6e87555db8c21ffdb77fc5bbb0e
 [2026-03-17T03:16:31Z] [SESSION-1] CHECKPOINT [task-001] step=3/5 ""Phase 7 MVP implementation complete; lint + tsc passed; preparing commit and PR""
 [2026-03-17T03:18:08Z] COMPLETE [task-001]
+[2026-03-17T03:35:07Z] ADD [task-002] Issue #4: prevent chat stream crashes on provider timeout and rate limit
+[2026-03-17T03:35:33Z] CLAIM [task-002] Issue #4: prevent chat stream crashes on provider timeout and rate limit worker=codex-main base=63fc105e0ae11629392a70bd22399cd9de9c07ad
+[2026-03-17T03:40:06Z] [SESSION-2] CHECKPOINT [task-002] step=2/4 "Chat stream error hardening implemented; lint + tsc passed; preparing commit and PR"
