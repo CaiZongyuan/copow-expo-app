@@ -10,7 +10,7 @@
     {
       "id": "task-001",
       "title": "Issue #2: Phase 7 tools layered architecture MVP",
-      "status": "in_progress",
+      "status": "completed",
       "priority": "P1",
       "depends_on": [],
       "attempts": 0,
@@ -25,9 +25,7 @@
       },
       "error_log": [],
       "checkpoints": [],
-      "completed_at": null,
-      "claimed_by": "codex-main",
-      "claimed_at": "2026-03-17T03:03:04Z"
+      "completed_at": "2026-03-17T03:18:08Z"
     }
   ],
   "session_count": 0,
