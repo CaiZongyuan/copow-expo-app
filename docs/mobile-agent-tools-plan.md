@@ -257,6 +257,7 @@ The important change is not the exact folder names. The important change is remo
 - `Completed`: switched `src/app/api/chat+api.ts` from static `chatTools` import to `buildToolContext(...)` + `buildChatTools(context)` and started passing client platform context via request headers.
 - `Completed`: added `tests/mobile-agent-tooling-architecture-upgrade.contract.ts` as a lightweight contract check compiled by `npx tsc --noEmit`.
 - `Completed`: excluded `ref/` from the app TypeScript program so project validation reflects product code rather than archived reference code.
+- `Completed`: hardened chat streaming error handling so provider timeout and 429 rate-limit failures are mapped to stable UI error messages instead of crashing the chat screen or breaking stream cleanup.
 - `Recorded`: foreground streaming chat can be interrupted when the app backgrounds; this is an expected limitation of the current transport model and is not being solved in the current slice.
 - `Recorded`: future product direction requires every session to become a resumable/background-capable agent task rather than a foreground-only stream.
 - `Recorded`: future product direction also requires multiple concurrent sessions plus session persistence.
@@ -277,6 +278,7 @@ The important change is not the exact folder names. The important change is remo
 - `open_external_url` currently validates explicit URL schemes and blocks obviously unsafe schemes such as `javascript:`, `data:`, and `file:`, but it does not yet implement a full app-specific allowlist or install-detection layer.
 - `list_writable_calendars` returns compact writable-calendar metadata, but calendar naming can still be ambiguous when users have multiple similar accounts or localized source names.
 - The existing `docs/expo-dev-client-chat-api-notes.md` appears to contain encoding issues and may need cleanup later, but that is not required for this task.
+- Provider retries can end in `RetryError` after timeout/429 responses; the UI transport therefore needs explicit server-side error-stream mapping and non-fatal client rendering instead of assuming the stream always closes cleanly.
 
 ## Decisions
 
@@ -299,6 +301,7 @@ The important change is not the exact folder names. The important change is remo
 - The next app-integration phase should use an app skills / capability registry plus low-level `open_external_url` execution, with detailed design tracked in `docs/mobile-agent-app-skills-registry-plan.md`.
 - Phase 7 implementation is being tracked through GitHub Epic `#1`, task issue `#2`, and Harness task `task-001` so the work can resume cleanly across sessions.
 - For this repository state, Phase 7 validation will use `bun run lint` and `npx tsc --noEmit` as objective checks, with additional manual verification for tool-card rendering because there is no dedicated unit-test runner yet.
+- Chat transport failures from the AI provider should degrade into user-visible retry guidance inside the chat UI, not a full-screen crash path; server responses must stay UI-message-stream compatible even when model startup fails.
 
 ## Implementation Notes
 
@@ -321,6 +324,8 @@ The important change is not the exact folder names. The important change is remo
 - The future session layer should support at least: multiple concurrent sessions, persisted message/task state, resumable tool execution, per-session status, and handoff between active UI and background processing.
 - `open_external_url` uses `expo-linking` `openURL()` directly with fallback handling instead of relying on `canOpenURL()` for every app scheme, because custom-scheme detection on iOS depends on `LSApplicationQueriesSchemes` and would be too brittle for the initial generic implementation.
 - `list_writable_calendars` should be the preferred preflight helper whenever the user asks to create an event on a specific calendar like work, personal, or a named account and the target is not already unambiguous.
+- `src/app/api/chat+api.ts` now maps `RetryError` and `APICallError` failures into `toUIMessageStreamResponse({ onError })` or a fallback `createUIMessageStreamResponse(...)`, so early stream failures still produce a valid UI error part.
+- `src/app/(tabs)/chatbot/index.tsx` now keeps the chat screen mounted on request failure, shows the error inline above the composer, clears stale errors on the next edit/send, and blocks repeated submits while a request is already in flight.
 
 ## Next Steps
 
