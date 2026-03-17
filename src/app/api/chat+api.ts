@@ -4,21 +4,19 @@ import {
   convertToModelMessages,
   stepCountIs,
   streamText,
-  UIMessage,
+  type UIMessage,
   wrapLanguageModel,
 } from "ai";
 
-import { chatTools } from "@/features/chat/tools/registry";
+import {
+  buildChatTools,
+  buildToolContext,
+} from "@/features/chat/tools/registry";
 
 const glm = createOpenAICompatible({
   name: "glm",
   baseURL: "https://open.bigmodel.cn/api/coding/paas/v4",
   apiKey: process.env.GLM_API_KEY,
-});
-
-const qwen = createOpenAICompatible({
-  name: "qwen",
-  baseURL: "http://192.168.2.30:1234/v1",
 });
 
 const qwenWithToolExamples = wrapLanguageModel({
@@ -31,6 +29,9 @@ export async function POST(req: Request) {
   const { messages }: { messages: UIMessage[] } = await req.json();
   const now = new Date();
   const currentTimeLine = `Current server time is ${now.toISOString()} (UTC).`;
+  const toolContext = buildToolContext({
+    platform: req.headers.get("x-chat-platform"),
+  });
 
   const result = streamText({
     // model: glm.chatModel("glm-4.7"),
@@ -46,7 +47,7 @@ export async function POST(req: Request) {
     //   console.log("[chat+api] stream chunk", chunk);
     // },
     stopWhen: stepCountIs(8),
-    tools: chatTools,
+    tools: buildChatTools(toolContext),
   });
 
   return result.toUIMessageStreamResponse({
