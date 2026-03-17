@@ -1,7 +1,7 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import {
-  APICallError,
   addToolInputExamplesMiddleware,
+  APICallError,
   convertToModelMessages,
   createUIMessageStream,
   createUIMessageStreamResponse,
@@ -23,9 +23,15 @@ const glm = createOpenAICompatible({
   apiKey: process.env.GLM_API_KEY,
 });
 
+// const qwen = createOpenAICompatible({
+//   name: "qwen",
+//   baseURL: "http://localhost:1234/v1",
+//   apiKey: process.env.GLM_API_KEY,
+// });
+
 const qwenWithToolExamples = wrapLanguageModel({
   // model: qwen.chatModel("qwen/qwen3.5-9b"),
-  model: glm.chatModel("glm-4.7"),
+  model: glm.chatModel("glm-5"),
   middleware: addToolInputExamplesMiddleware(),
 });
 
@@ -39,13 +45,16 @@ function getApiErrorFromRetryError(error: RetryError) {
 }
 
 function getChatErrorMessage(error: unknown) {
-  const retryApiError =
-    RetryError.isInstance(error) ? getApiErrorFromRetryError(error) : undefined;
+  const retryApiError = RetryError.isInstance(error)
+    ? getApiErrorFromRetryError(error)
+    : undefined;
   const apiError = APICallError.isInstance(error) ? error : retryApiError;
   const errorText = [
     error instanceof Error ? error.message : "Unknown chat error.",
     apiError?.message,
-    typeof apiError?.responseBody === "string" ? apiError.responseBody : undefined,
+    typeof apiError?.responseBody === "string"
+      ? apiError.responseBody
+      : undefined,
   ]
     .filter(Boolean)
     .join("\n");
@@ -65,8 +74,9 @@ function getChatErrorMessage(error: unknown) {
 }
 
 function logChatError(error: unknown) {
-  const retryApiError =
-    RetryError.isInstance(error) ? getApiErrorFromRetryError(error) : undefined;
+  const retryApiError = RetryError.isInstance(error)
+    ? getApiErrorFromRetryError(error)
+    : undefined;
   const apiError = APICallError.isInstance(error) ? error : retryApiError;
 
   console.error("[chat+api] chat stream failed", {

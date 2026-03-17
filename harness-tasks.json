@@ -30,7 +30,7 @@
     {
       "id": "task-002",
       "title": "Issue #4: prevent chat stream crashes on provider timeout and rate limit",
-      "status": "in_progress",
+      "status": "completed",
       "priority": "P1",
       "depends_on": [],
       "attempts": 0,
@@ -52,9 +52,7 @@
           "timestamp": "2026-03-17T03:40:06Z"
         }
       ],
-      "completed_at": null,
-      "claimed_by": "codex-main",
-      "claimed_at": "2026-03-17T03:35:33Z"
+      "completed_at": "2026-03-17T03:43:10Z"
     }
   ],
   "session_count": 0,
