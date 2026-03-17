@@ -246,6 +246,7 @@ The important change is not the exact folder names. The important change is remo
 - `Completed`: reviewed the current flat tool registry against the `ref/Tools-design.md` and `ref/agent-clip/` reference design.
 - `Completed`: decided to adopt agent-clip's principles selectively instead of replacing typed mobile tools with a single `run(command)` interface.
 - `Completed`: recorded a layered upgrade direction for manifests, dynamic tool exposure, executors, formatters, and app-skill resolvers.
+- `Completed`: generated the Phase 7 delivery contract docs in `docs/prd/mobile-agent-tooling-architecture-upgrade.md`, `docs/api/mobile-agent-tooling-architecture-upgrade.md`, and `docs/ui/mobile-agent-tooling-architecture-upgrade.md`.
 - `Recorded`: foreground streaming chat can be interrupted when the app backgrounds; this is an expected limitation of the current transport model and is not being solved in the current slice.
 - `Recorded`: future product direction requires every session to become a resumable/background-capable agent task rather than a foreground-only stream.
 - `Recorded`: future product direction also requires multiple concurrent sessions plus session persistence.
@@ -277,6 +278,7 @@ The important change is not the exact folder names. The important change is remo
 - Do not replace the mobile tool surface with a single `run(command)` tool; keep typed AI SDK tools as the public interface.
 - Reuse agent-clip's deeper ideas instead: progressive capability disclosure, strong corrective errors, and execution/presentation separation.
 - Evolve the current registry into a layered system of manifests, exposure builders, executors, formatters, and resolver-backed app skills.
+- Phase 7 implementation should preserve the typed public tool surface where practical while allowing internal module boundaries to change aggressively.
 - Treat low-level tools as execution primitives and keep higher-level workflow knowledge in separate capability docs or resolvers instead of inflating tool descriptions.
 - Use AI SDK approval responses as the gate for confirm-only mobile tools, and only execute those tools on-device after the related approval has been recorded in chat state.
 - Give the model a concrete notion of current time in two ways: a stamped system prompt and a deterministic `get_current_time` tool.
